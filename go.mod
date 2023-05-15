@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/chzyer/readline v1.5.1
+	github.com/mattn/go-sqlite3 v1.14.16
 	github.com/rs/zerolog v1.29.1
 	github.com/sashabaranov/go-openai v1.9.4
 	golang.org/x/exp v0.0.0-20230510235704-dd950f8aeaea

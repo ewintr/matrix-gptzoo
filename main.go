@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/chzyer/readline"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/sashabaranov/go-openai"
 	"golang.org/x/exp/slog"
 	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/crypto/cryptohelper"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
@@ -19,83 +22,48 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
 	MatrixHomeserver, ok := os.LookupEnv("MATRIX_HOMESERVER")
 	if !ok {
-		slog.Error("MATRIX_HOME_SERVER is not set")
+		logger.Error("MATRIX_HOME_SERVER is not set!")
 		os.Exit(1)
 	}
 	MatrixUserIDStr, ok := os.LookupEnv("MATRIX_USER_ID")
 	if !ok {
-		slog.Error("MATRIX_USER_ID is not set")
+		logger.Error("MATRIX_USER_ID is not set")
 		os.Exit(1)
 	}
 	MatrixUserID := id.UserID(MatrixUserIDStr)
 	MatrixAccessKey, ok := os.LookupEnv("MATRIX_ACCESS_KEY")
 	if !ok {
-		slog.Error("MATRIX_ACCESS_KEY is not set")
+		logger.Error("MATRIX_ACCESS_KEY is not set")
 		os.Exit(1)
+	}
+	MatrixPassword, ok := os.LookupEnv("MATRIX_PASSWORD")
+	if !ok {
+		logger.Error("MATRIX_PASSWORD is not set")
+		os.Exit(1)
+	}
+	BotDatabasePath, ok := os.LookupEnv("BOT_DATABASE_PATH")
+	if !ok {
+		logger.Error("BOT_DATABASE_PATH is not set")
+		os.Exit(1)
+	}
+	BotPickle, ok := os.LookupEnv("BOT_PICKLE")
+	if !ok {
+		logger.Error("BOT_PICKLE is not set")
 	}
 	OpenaiAPIKey, ok := os.LookupEnv("OPENAI_API_KEY")
 	if !ok {
-		slog.Error("OPENAI_API_KEY is not set")
+		logger.Error("OPENAI_API_KEY is not set")
 		os.Exit(1)
 	}
 
 	// Create new OpenAI client
 	openaiClient := openai.NewClient(OpenaiAPIKey)
 
-	//matrixClient, _ := mautrix.NewClient(MatrixHomeserver, MatrixUserID, MatrixAccessKey)
-	//
-	//syncer := matrixClient.Syncer.(*mautrix.DefaultSyncer)
-	//syncer.OnEventType(event.StateMember, func(source mautrix.EventSource, evt *event.Event) {
-	//	if evt.Content["membership"] == "invite" && *ev.StateKey == MatrixUserID {
-	//		_, err := matrixClient.JoinRoom(ev.RoomID, "", nil)
-	//		if err != nil {
-	//			fmt.Println("Failed to join room:", err)
-	//		}
-	//	}
-	//})
-	//
-	//syncer.OnEventType("m.room.message", func(ev *gomatrix.Event) {
-	//	if ev.Sender != MatrixUserID {
-	//		msgBody, _ := ev.Body()
-	//
-	//		// Generate a message with OpenAI API
-	//		openAiResp, err := openaiClient.CreateChatCompletion(
-	//			context.Background(),
-	//			openai.ChatCompletionRequest{
-	//				Model: openai.GPT4,
-	//				Messages: []openai.ChatCompletionMessage{
-	//					{
-	//						Role:    openai.ChatMessageRoleSystem,
-	//						Content: "You are a chatbot that helps people by responding to their questions with short messages.",
-	//					},
-	//
-	//					{
-	//						Role:    openai.ChatMessageRoleUser,
-	//						Content: msgBody,
-	//					},
-	//				},
-	//			})
-	//
-	//		if err != nil {
-	//			fmt.Println("OpenAI API returned with ", err)
-	//			return
-	//		}
-	//
-	//		// Send the OpenAI response back to the chat
-	//		responseText := openAiResp.Choices[len(openAiResp.Choices)-1].Message.Content
-	//		formattedResponse := blackfriday.Run([]byte(responseText))
-	//		_, _ = matrixClient.SendFormattedText(ev.RoomID, responseText, string(formattedResponse))
-	//	}
-	//})
-	//
-	//for {
-	//	if err := matrixClient.Sync(); err != nil {
-	//		fmt.Println("Sync() returned with ", err)
-	//	}
-	//}
-
+	// Create new Matrix client
 	client, err := mautrix.NewClient(MatrixHomeserver, MatrixUserID, MatrixAccessKey)
 	if err != nil {
 		panic(err)
@@ -104,28 +72,27 @@ func main() {
 	var oei mautrix.OldEventIgnorer
 	oei.Register(client.Syncer.(mautrix.ExtensibleSyncer))
 
+	// logger for matrix client
 	rl, err := readline.New("[no room]> ")
 	if err != nil {
 		panic(err)
 	}
 	defer rl.Close()
-	log := zerolog.New(zerolog.NewConsoleWriter(func(w *zerolog.ConsoleWriter) {
+	matrixLogger := zerolog.New(zerolog.NewConsoleWriter(func(w *zerolog.ConsoleWriter) {
 		w.Out = rl.Stdout()
 		w.TimeFormat = time.Stamp
 	})).With().Timestamp().Logger()
-	//if !*debug {
-	//	log = log.Level(zerolog.InfoLevel)
-	//}
-	client.Log = log
+	client.Log = matrixLogger
 
 	var lastRoomID id.RoomID
 
+	// Set up sync events
 	syncer := client.Syncer.(*mautrix.DefaultSyncer)
 
 	syncer.OnEventType(event.EventMessage, func(source mautrix.EventSource, evt *event.Event) {
 		lastRoomID = evt.RoomID
 		rl.SetPrompt(fmt.Sprintf("%s> ", lastRoomID))
-		log.Info().
+		matrixLogger.Info().
 			Str("sender", evt.Sender.String()).
 			Str("type", evt.Type.String()).
 			Str("id", evt.ID.String()).
@@ -184,31 +151,31 @@ func main() {
 		}
 	})
 
-	//cryptoHelper, err := cryptohelper.NewCryptoHelper(client, []byte("meow"), "mautrix-example.db")
-	//if err != nil {
-	//	panic(err)
-	//}
-	//
-	//// You can also store the user/device IDs and access token and put them in the client beforehand instead of using LoginAs.
-	////client.UserID = "..."
-	////client.DeviceID = "..."
-	////client.AccessToken = "..."
-	//// You don't need to set a device ID in LoginAs because the crypto helper will set it for you if necessary.
-	////cryptoHelper.LoginAs = &mautrix.ReqLogin{
-	////	Type:       mautrix.AuthTypePassword,
-	////	Identifier: mautrix.UserIdentifier{Type: mautrix.IdentifierTypeUser, User: *username},
-	////	Password:   *password,
-	////}
-	//// If you want to use multiple clients with the same DB, you should set a distinct database account ID for each one.
-	////cryptoHelper.DBAccountID = ""
-	//err = cryptoHelper.Init()
-	//if err != nil {
-	//	panic(err)
-	//}
-	//// Set the client crypto helper in order to automatically encrypt outgoing messages
-	//client.Crypto = cryptoHelper
+	cryptoHelper, err := cryptohelper.NewCryptoHelper(client, []byte(BotPickle), BotDatabasePath)
+	if err != nil {
+		panic(err)
+	}
 
-	log.Info().Msg("Now running")
+	// You can also store the user/device IDs and access token and put them in the client beforehand instead of using LoginAs.
+	//client.UserID = "..."
+	//client.DeviceID = "..."
+	//client.AccessToken = "..."
+	// You don't need to set a device ID in LoginAs because the crypto helper will set it for you if necessary.
+	cryptoHelper.LoginAs = &mautrix.ReqLogin{
+		Type:       mautrix.AuthTypePassword,
+		Identifier: mautrix.UserIdentifier{Type: mautrix.IdentifierTypeUser, User: MatrixUserID.String()},
+		Password:   MatrixPassword,
+	}
+	// If you want to use multiple clients with the same DB, you should set a distinct database account ID for each one.
+	//cryptoHelper.DBAccountID = ""
+	err = cryptoHelper.Init()
+	if err != nil {
+		panic(err)
+	}
+	// Set the client crypto helper in order to automatically encrypt outgoing messages
+	client.Crypto = cryptoHelper
+
+	matrixLogger.Info().Msg("Now running")
 	syncCtx, cancelSync := context.WithCancel(context.Background())
 	var syncStopWait sync.WaitGroup
 	syncStopWait.Add(1)
@@ -225,26 +192,10 @@ func main() {
 	signal.Notify(done, os.Interrupt)
 	<-done
 
-	//for {
-	//	line, err := rl.Readline()
-	//	if err != nil { // io.EOF
-	//		break
-	//	}
-	//	if lastRoomID == "" {
-	//		log.Error().Msg("Wait for an incoming message before sending messages")
-	//		continue
-	//	}
-	//	resp, err := client.SendText(lastRoomID, line)
-	//	if err != nil {
-	//		log.Error().Err(err).Msg("Failed to send event")
-	//	} else {
-	//		log.Info().Str("event_id", resp.EventID.String()).Msg("Event sent")
-	//	}
-	//}
 	cancelSync()
 	syncStopWait.Wait()
-	//err = cryptoHelper.Close()
-	//if err != nil {
-	//	log.Error().Err(err).Msg("Error closing database")
-	//}
+	err = cryptoHelper.Close()
+	if err != nil {
+		log.Error().Err(err).Msg("Error closing database")
+	}
 }
