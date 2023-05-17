@@ -1,13 +1,11 @@
-package matrix
+package bot
 
 import (
-	"context"
 	"fmt"
 	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/rs/zerolog"
-	"github.com/sashabaranov/go-openai"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/crypto/cryptohelper"
 	"maunium.net/go/mautrix/event"
@@ -22,13 +20,16 @@ type Config struct {
 	UserPassword  string
 	DBPath        string
 	Pickle        string
+	OpenAIKey     string
 }
 
 type Matrix struct {
-	config       Config
-	readline     *readline.Instance
-	client       *mautrix.Client
-	cryptoHelper *cryptohelper.CryptoHelper
+	config        Config
+	readline      *readline.Instance
+	client        *mautrix.Client
+	cryptoHelper  *cryptohelper.CryptoHelper
+	conversations Conversations
+	gptClient     *GPT
 }
 
 func New(cfg Config) *Matrix {
@@ -38,13 +39,6 @@ func New(cfg Config) *Matrix {
 }
 
 func (m *Matrix) Init() error {
-	rl, err := readline.New("[no room]> ")
-	if err != nil {
-		return err
-	}
-	m.readline = rl
-	defer m.readline.Close()
-
 	client, err := mautrix.NewClient(m.config.Homeserver, id.UserID(m.config.UserID), m.config.UserAccessKey)
 	if err != nil {
 		return err
@@ -54,7 +48,6 @@ func (m *Matrix) Init() error {
 	m.client = client
 
 	m.client.Log = zerolog.New(zerolog.NewConsoleWriter(func(w *zerolog.ConsoleWriter) {
-		w.Out = rl.Stdout()
 		w.TimeFormat = time.Stamp
 	})).With().Timestamp().Logger()
 
@@ -71,6 +64,10 @@ func (m *Matrix) Init() error {
 		return err
 	}
 	m.client.Crypto = m.cryptoHelper
+
+	m.gptClient = NewGPT(m.config.OpenAIKey)
+
+	m.conversations = make(Conversations, 0)
 
 	return nil
 }
@@ -104,7 +101,6 @@ func (m *Matrix) InviteHandler() (event.Type, mautrix.EventHandler) {
 		if evt.GetStateKey() == m.client.UserID.String() && evt.Content.AsMember().Membership == event.MembershipInvite {
 			_, err := m.client.JoinRoomByID(evt.RoomID)
 			if err == nil {
-				m.readline.SetPrompt(fmt.Sprintf("%s> ", evt.RoomID))
 				m.client.Log.Info().
 					Str("room_id", evt.RoomID.String()).
 					Str("inviter", evt.Sender.String()).
@@ -119,36 +115,15 @@ func (m *Matrix) InviteHandler() (event.Type, mautrix.EventHandler) {
 	}
 }
 
-func (m *Matrix) RespondHandler(gpt *openai.Client) (event.Type, mautrix.EventHandler) {
+func (m *Matrix) RespondHandler() (event.Type, mautrix.EventHandler) {
 	return event.EventMessage, func(source mautrix.EventSource, evt *event.Event) {
-		m.readline.SetPrompt(fmt.Sprintf("%s> ", evt.RoomID))
 		m.client.Log.Info().
-			Str("sender", evt.Sender.String()).
-			Str("type", evt.Type.String()).
-			Str("id", evt.ID.String()).
 			Str("body", evt.Content.AsMessage().Body).
 			Msg("Received message")
 
 		if evt.Sender != id.UserID(m.config.UserID) {
 			msgBody := evt.Content.AsMessage().Body
-
-			// Generate a message with OpenAI API
-			openAiResp, err := gpt.CreateChatCompletion(
-				context.Background(),
-				openai.ChatCompletionRequest{
-					Model: openai.GPT4,
-					Messages: []openai.ChatCompletionMessage{
-						{
-							Role:    openai.ChatMessageRoleSystem,
-							Content: "You are a chatbot that helps people by responding to their questions with short messages.",
-						},
-
-						{
-							Role:    openai.ChatMessageRoleUser,
-							Content: msgBody,
-						},
-					},
-				})
+			resp, err := m.gptClient.Complete(NewConversation(msgBody))
 
 			if err != nil {
 				fmt.Println("OpenAI API returned with ", err)
@@ -156,9 +131,8 @@ func (m *Matrix) RespondHandler(gpt *openai.Client) (event.Type, mautrix.EventHa
 			}
 
 			// Send the OpenAI response back to the chat
-			responseMarkdown := openAiResp.Choices[len(openAiResp.Choices)-1].Message.Content
-			responseMessage := format.RenderMarkdown(responseMarkdown, true, false)
-			m.client.SendMessageEvent(evt.RoomID, event.EventMessage, &responseMessage)
+			formattedResp := format.RenderMarkdown(resp, true, false)
+			m.client.SendMessageEvent(evt.RoomID, event.EventMessage, &formattedResp)
 		}
 	}
 }
