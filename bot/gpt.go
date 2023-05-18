@@ -26,7 +26,7 @@ func (g GPT) Complete(conv *Conversation) (string, error) {
 		})
 	}
 	req := openai.ChatCompletionRequest{
-		Model:    openai.GPT3Dot5Turbo,
+		Model:    openai.GPT4,
 		Messages: msg,
 	}
 
