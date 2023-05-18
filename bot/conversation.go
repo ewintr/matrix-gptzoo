@@ -1,14 +1,17 @@
 package bot
 
-import "github.com/sashabaranov/go-openai"
+import (
+	"github.com/sashabaranov/go-openai"
+	"maunium.net/go/mautrix/id"
+)
 
 const systemPrompt = "You are a chatbot that helps people by responding to their questions with short messages."
 
 type Message struct {
-	EventID   string
-	Role      string
-	Content   string
-	ReplyToID string
+	EventID  id.EventID
+	Role     string
+	Content  string
+	ParentID id.EventID
 }
 
 type Conversation struct {
@@ -30,9 +33,9 @@ func NewConversation(question string) *Conversation {
 	}
 }
 
-func (c *Conversation) Contains(EventID string) bool {
+func (c *Conversation) Contains(EventID id.EventID) bool {
 	for _, m := range c.Messages {
-		if m.EventID == EventID {
+		if m.EventID.String() == EventID.String() {
 			return true
 		}
 	}
@@ -46,24 +49,12 @@ func (c *Conversation) Add(msg Message) {
 
 type Conversations []*Conversation
 
-func (cs Conversations) Contains(EventID string) bool {
+func (cs Conversations) FindByEventID(EventID id.EventID) *Conversation {
 	for _, c := range cs {
 		if c.Contains(EventID) {
-			return true
+			return c
 		}
 	}
 
-	return false
-}
-
-func (cs Conversations) Add(msg Message) {
-	for _, c := range cs {
-		if c.Contains(msg.EventID) {
-			c.Add(msg)
-			return
-		}
-	}
-
-	c := NewConversation(msg.Content)
-	cs = append(cs, c)
+	return nil
 }

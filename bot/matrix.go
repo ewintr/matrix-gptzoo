@@ -6,6 +6,7 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/rs/zerolog"
+	"github.com/sashabaranov/go-openai"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/crypto/cryptohelper"
 	"maunium.net/go/mautrix/event"
@@ -118,30 +119,63 @@ func (m *Matrix) InviteHandler() (event.Type, mautrix.EventHandler) {
 func (m *Matrix) RespondHandler() (event.Type, mautrix.EventHandler) {
 	return event.EventMessage, func(source mautrix.EventSource, evt *event.Event) {
 		content := evt.Content.AsMessage()
-		eventID := evt.ID
 		m.client.Log.Info().
 			Str("content", content.Body).
 			Msg("Received message")
 
 		if evt.Sender != id.UserID(m.config.UserID) {
-			resp, err := m.gptClient.Complete(NewConversation(content.Body))
+			eventID := evt.ID
+			parentID := id.EventID("")
+			if relatesTo := content.GetRelatesTo(); relatesTo != nil {
+				parentID = relatesTo.GetReplyTo()
+			}
+
+			// find existing conversation and add message, or start a new one
+			var conv *Conversation
+			if parentID != "" {
+				conv = m.conversations.FindByEventID(parentID)
+			}
+			if conv != nil {
+				conv.Add(Message{
+					EventID:  eventID,
+					ParentID: parentID,
+					Role:     openai.ChatMessageRoleUser,
+					Content:  content.Body,
+				})
+
+			} else {
+				conv = NewConversation(content.Body)
+				m.conversations = append(m.conversations, conv)
+			}
+
+			// get reply from GPT
+			reply, err := m.gptClient.Complete(conv)
 			if err != nil {
 				m.client.Log.Error().Err(err).Msg("OpenAI API returned with ")
 				return
 			}
 
-			formattedResp := format.RenderMarkdown(resp, true, false)
-			formattedResp.RelatesTo = &event.RelatesTo{
+			formattedReply := format.RenderMarkdown(reply, true, false)
+			formattedReply.RelatesTo = &event.RelatesTo{
 				InReplyTo: &event.InReplyTo{
 					EventID: eventID,
 				},
 			}
-			if _, err := m.client.SendMessageEvent(evt.RoomID, event.EventMessage, &formattedResp); err != nil {
+			resp, err := m.client.SendMessageEvent(evt.RoomID, event.EventMessage, &formattedReply)
+			if err != nil {
 				m.client.Log.Err(err).Msg("failed to send message")
 				return
 			}
 
-			m.client.Log.Info().Str("message", fmt.Sprintf("%+v", formattedResp.Body)).Msg("Sent message")
+			// add reply to conversation
+			conv.Add(Message{
+				EventID:  resp.EventID,
+				Role:     openai.ChatMessageRoleAssistant,
+				Content:  reply,
+				ParentID: eventID,
+			})
+
+			m.client.Log.Info().Str("message", fmt.Sprintf("%+v", formattedReply.Body)).Msg("Sent reply")
 
 		}
 	}
