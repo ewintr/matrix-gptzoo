@@ -49,7 +49,7 @@ func (m *Matrix) Init() error {
 
 	m.client.Log = zerolog.New(zerolog.NewConsoleWriter(func(w *zerolog.ConsoleWriter) {
 		w.TimeFormat = time.Stamp
-	})).With().Timestamp().Logger()
+	})).With().Timestamp().Logger().Level(zerolog.InfoLevel)
 
 	m.cryptoHelper, err = cryptohelper.NewCryptoHelper(client, []byte(m.config.Pickle), m.config.DBPath)
 	if err != nil {
@@ -117,22 +117,32 @@ func (m *Matrix) InviteHandler() (event.Type, mautrix.EventHandler) {
 
 func (m *Matrix) RespondHandler() (event.Type, mautrix.EventHandler) {
 	return event.EventMessage, func(source mautrix.EventSource, evt *event.Event) {
+		content := evt.Content.AsMessage()
+		eventID := evt.ID
 		m.client.Log.Info().
-			Str("body", evt.Content.AsMessage().Body).
+			Str("content", content.Body).
 			Msg("Received message")
 
 		if evt.Sender != id.UserID(m.config.UserID) {
-			msgBody := evt.Content.AsMessage().Body
-			resp, err := m.gptClient.Complete(NewConversation(msgBody))
-
+			resp, err := m.gptClient.Complete(NewConversation(content.Body))
 			if err != nil {
-				fmt.Println("OpenAI API returned with ", err)
+				m.client.Log.Error().Err(err).Msg("OpenAI API returned with ")
 				return
 			}
 
-			// Send the OpenAI response back to the chat
 			formattedResp := format.RenderMarkdown(resp, true, false)
-			m.client.SendMessageEvent(evt.RoomID, event.EventMessage, &formattedResp)
+			formattedResp.RelatesTo = &event.RelatesTo{
+				InReplyTo: &event.InReplyTo{
+					EventID: eventID,
+				},
+			}
+			if _, err := m.client.SendMessageEvent(evt.RoomID, event.EventMessage, &formattedResp); err != nil {
+				m.client.Log.Err(err).Msg("failed to send message")
+				return
+			}
+
+			m.client.Log.Info().Str("message", fmt.Sprintf("%+v", formattedResp.Body)).Msg("Sent message")
+
 		}
 	}
 }
