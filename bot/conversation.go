@@ -18,7 +18,7 @@ type Conversation struct {
 	Messages []Message
 }
 
-func NewConversation(question string) *Conversation {
+func NewConversation(id id.EventID, question string) *Conversation {
 	return &Conversation{
 		Messages: []Message{
 			{
@@ -26,6 +26,7 @@ func NewConversation(question string) *Conversation {
 				Content: systemPrompt,
 			},
 			{
+				EventID: id,
 				Role:    openai.ChatMessageRoleUser,
 				Content: question,
 			},

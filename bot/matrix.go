@@ -116,7 +116,7 @@ func (m *Matrix) InviteHandler() (event.Type, mautrix.EventHandler) {
 	}
 }
 
-func (m *Matrix) RespondHandler() (event.Type, mautrix.EventHandler) {
+func (m *Matrix) ResponseHandler() (event.Type, mautrix.EventHandler) {
 	return event.EventMessage, func(source mautrix.EventSource, evt *event.Event) {
 		content := evt.Content.AsMessage()
 		eventID := evt.ID
@@ -137,6 +137,7 @@ func (m *Matrix) RespondHandler() (event.Type, mautrix.EventHandler) {
 			parentID = relatesTo.GetReplyTo()
 		}
 		if parentID != "" {
+			m.client.Log.Info().Msg("parent found, looking for conversation")
 			conv = m.conversations.FindByEventID(parentID)
 		}
 		if conv != nil {
@@ -148,7 +149,7 @@ func (m *Matrix) RespondHandler() (event.Type, mautrix.EventHandler) {
 			})
 			m.client.Log.Info().Msg("found parent, appending message to conversation")
 		} else {
-			conv = NewConversation(content.Body)
+			conv = NewConversation(eventID, content.Body)
 			m.conversations = append(m.conversations, conv)
 			m.client.Log.Info().Msg("no parent found, starting new conversation")
 		}
