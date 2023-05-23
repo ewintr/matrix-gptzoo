@@ -28,8 +28,8 @@ func main() {
 	}
 	go matrixClient.Run()
 
-	matrixClient.AddEventHandler(matrixClient.InviteHandler())
-	matrixClient.AddEventHandler(matrixClient.ResponseHandler())
+	matrixClient.AddEventHandler(matrixClient.InviteHandler(logger))
+	matrixClient.AddEventHandler(matrixClient.ResponseHandler(logger))
 
 	done := make(chan os.Signal)
 	signal.Notify(done, os.Interrupt)

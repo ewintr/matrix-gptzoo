@@ -1,12 +1,12 @@
 package bot
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/rs/zerolog"
 	"github.com/sashabaranov/go-openai"
+	"golang.org/x/exp/slog"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/crypto/cryptohelper"
 	"maunium.net/go/mautrix/event"
@@ -97,38 +97,29 @@ func (m *Matrix) AddEventHandler(eventType event.Type, handler mautrix.EventHand
 	syncer.OnEventType(eventType, handler)
 }
 
-func (m *Matrix) InviteHandler() (event.Type, mautrix.EventHandler) {
+func (m *Matrix) InviteHandler(logger *slog.Logger) (event.Type, mautrix.EventHandler) {
 	return event.StateMember, func(source mautrix.EventSource, evt *event.Event) {
 		if evt.GetStateKey() == m.client.UserID.String() && evt.Content.AsMember().Membership == event.MembershipInvite {
 			_, err := m.client.JoinRoomByID(evt.RoomID)
-			if err == nil {
-				m.client.Log.Info().
-					Str("room_id", evt.RoomID.String()).
-					Str("inviter", evt.Sender.String()).
-					Msg("Joined room after invite")
-			} else {
-				m.client.Log.Error().Err(err).
-					Str("room_id", evt.RoomID.String()).
-					Str("inviter", evt.Sender.String()).
-					Msg("Failed to join room after invite")
+			if err != nil {
+				logger.Error("failed to join room after invite", slog.String("err", err.Error()), slog.String("room_id", evt.RoomID.String()), slog.String("inviter", evt.Sender.String()))
+				return
 			}
+
+			logger.Info("Joined room after invite", slog.String("room_id", evt.RoomID.String()), slog.String("inviter", evt.Sender.String()))
 		}
 	}
 }
 
-func (m *Matrix) ResponseHandler() (event.Type, mautrix.EventHandler) {
+func (m *Matrix) ResponseHandler(logger *slog.Logger) (event.Type, mautrix.EventHandler) {
 	return event.EventMessage, func(source mautrix.EventSource, evt *event.Event) {
 		content := evt.Content.AsMessage()
 		eventID := evt.ID
-		m.client.Log.Info().
-			Str("content", content.Body).
-			Msg("received message")
+		logger.Info("received message", slog.String("content", content.Body))
 
 		conv := m.conversations.FindByEventID(eventID)
 		if conv != nil {
-			m.client.Log.Info().
-				Str("event_id", eventID.String()).
-				Msg("already known message, ignoring")
+			logger.Info("known message, ignoring", slog.String("event_id", eventID.String()))
 			return
 		}
 
@@ -137,7 +128,7 @@ func (m *Matrix) ResponseHandler() (event.Type, mautrix.EventHandler) {
 			parentID = relatesTo.GetReplyTo()
 		}
 		if parentID != "" {
-			m.client.Log.Info().Msg("parent found, looking for conversation")
+			logger.Info("parent found, looking for conversation", slog.String("parent_id", parentID.String()))
 			conv = m.conversations.FindByEventID(parentID)
 		}
 		if conv != nil {
@@ -147,18 +138,18 @@ func (m *Matrix) ResponseHandler() (event.Type, mautrix.EventHandler) {
 				Role:     openai.ChatMessageRoleUser,
 				Content:  content.Body,
 			})
-			m.client.Log.Info().Msg("found parent, appending message to conversation")
+			logger.Info("found parent, appending message to conversation", slog.String("event_id", eventID.String()))
 		} else {
 			conv = NewConversation(eventID, content.Body)
 			m.conversations = append(m.conversations, conv)
-			m.client.Log.Info().Msg("no parent found, starting new conversation")
+			logger.Info("no parent found, starting new conversation", slog.String("event_id", eventID.String()))
 		}
 
 		if evt.Sender != id.UserID(m.config.UserID) {
 			// get reply from GPT
 			reply, err := m.gptClient.Complete(conv)
 			if err != nil {
-				m.client.Log.Error().Err(err).Msg("OpenAI API returned with ")
+				logger.Error("failed to get reply from openai", slog.String("err", err.Error()))
 				return
 			}
 
@@ -169,11 +160,14 @@ func (m *Matrix) ResponseHandler() (event.Type, mautrix.EventHandler) {
 				},
 			}
 			if _, err := m.client.SendMessageEvent(evt.RoomID, event.EventMessage, &formattedReply); err != nil {
-				m.client.Log.Err(err).Msg("failed to send message")
+				logger.Error("failed to send message", slog.String("err", err.Error()))
 				return
 			}
 
-			m.client.Log.Info().Str("message", fmt.Sprintf("%+v", formattedReply.Body)).Msg("Sent reply")
+			if len(reply) > 30 {
+				reply = reply[:30] + "..."
+			}
+			logger.Info("sent reply", slog.String("parent_id", eventID.String()), slog.String("content", reply))
 		}
 	}
 }
