@@ -10,6 +10,7 @@ import (
 )
 
 func main() {
+
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	matrixClient := bot.New(bot.Config{
