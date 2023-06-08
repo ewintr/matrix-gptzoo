@@ -2,10 +2,19 @@ package bot
 
 import (
 	"github.com/sashabaranov/go-openai"
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/id"
 )
 
 const systemPrompt = "You are a chatbot that helps people by responding to their questions with short messages."
+
+type Character struct {
+	UserID    string
+	Password  string
+	AccessKey string
+	Prompt    string
+	client    *mautrix.Client
+}
 
 type Message struct {
 	EventID  id.EventID
