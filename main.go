@@ -13,7 +13,7 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	matrixClient := bot.New(bot.Config{
+	botConfigs := []bot.Config{{
 		Homeserver:      getParam("MATRIX_HOMESERVER", "http://localhost"),
 		UserID:          getParam("MATRIX_USER_ID", "@bot:localhost"),
 		UserPassword:    getParam("MATRIX_PASSWORD", "secret"),
@@ -22,13 +22,17 @@ func main() {
 		DBPath:          getParam("BOT_DB_PATH", "bot.db"),
 		Pickle:          getParam("BOT_PICKLE", "scrambled"),
 		OpenAIKey:       getParam("OPENAI_API_KEY", "no key"),
-	}, logger)
+		SystemPrompt:    "You are a chatbot that helps people by responding to their questions with short messages.",
+	}}
 
-	if err := matrixClient.Init(); err != nil {
-		logger.Error(err.Error())
-		os.Exit(1)
+	for _, bc := range botConfigs {
+		b := bot.New(bc, logger)
+		if err := b.Init(); err != nil {
+			logger.Error(err.Error())
+			os.Exit(1)
+		}
+		go b.Run()
 	}
-	go matrixClient.Run()
 
 	done := make(chan os.Signal)
 	signal.Notify(done, os.Interrupt)

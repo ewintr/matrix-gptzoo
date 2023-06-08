@@ -6,8 +6,6 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-const systemPrompt = "You are a chatbot that helps people by responding to their questions with short messages."
-
 type Character struct {
 	UserID    string
 	Password  string
@@ -27,7 +25,7 @@ type Conversation struct {
 	Messages []Message
 }
 
-func NewConversation(id id.EventID, question string) *Conversation {
+func NewConversation(id id.EventID, systemPrompt, question string) *Conversation {
 	return &Conversation{
 		Messages: []Message{
 			{

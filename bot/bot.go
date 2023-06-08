@@ -3,10 +3,7 @@ package bot
 import (
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/chzyer/readline"
-	"github.com/rs/zerolog"
 	"github.com/sashabaranov/go-openai"
 	"golang.org/x/exp/slog"
 	"maunium.net/go/mautrix"
@@ -25,11 +22,11 @@ type Config struct {
 	DBPath          string
 	Pickle          string
 	OpenAIKey       string
+	SystemPrompt    string
 }
 
 type Bot struct {
 	config        Config
-	readline      *readline.Instance
 	client        *mautrix.Client
 	cryptoHelper  *cryptohelper.CryptoHelper
 	characters    []Character
@@ -53,10 +50,6 @@ func (m *Bot) Init() error {
 	var oei mautrix.OldEventIgnorer
 	oei.Register(client.Syncer.(mautrix.ExtensibleSyncer))
 	m.client = client
-	m.client.Log = zerolog.New(zerolog.NewConsoleWriter(func(w *zerolog.ConsoleWriter) {
-		w.TimeFormat = time.Stamp
-	})).With().Timestamp().Logger().Level(zerolog.InfoLevel)
-
 	m.cryptoHelper, err = cryptohelper.NewCryptoHelper(client, []byte(m.config.Pickle), m.config.DBPath)
 	if err != nil {
 		return err
@@ -70,11 +63,8 @@ func (m *Bot) Init() error {
 		return err
 	}
 	m.client.Crypto = m.cryptoHelper
-
 	m.gptClient = NewGPT(m.config.OpenAIKey)
-
 	m.conversations = make(Conversations, 0)
-
 	m.AddEventHandler(m.InviteHandler())
 	m.AddEventHandler(m.ResponseHandler())
 
@@ -114,7 +104,7 @@ func (m *Bot) InviteHandler() (event.Type, mautrix.EventHandler) {
 				return
 			}
 
-			m.logger.Info("Joined room after invite", slog.String("room_id", evt.RoomID.String()), slog.String("inviter", evt.Sender.String()))
+			m.logger.Info("joined room after invite", slog.String("room_id", evt.RoomID.String()), slog.String("inviter", evt.Sender.String()))
 		}
 	}
 }
@@ -156,11 +146,11 @@ func (m *Bot) ResponseHandler() (event.Type, mautrix.EventHandler) {
 			}
 		}
 
-		// find out if message is addressed to the bot
+		// find out if message is a new question addressed to the bot
 		m.logger.Info(content.Body)
 		if conv == nil && strings.HasPrefix(strings.ToLower(content.Body), strings.ToLower(fmt.Sprintf("%s: ", m.config.UserDisplayName))) {
 			m.logger.Info("message is addressed to bot", slog.String("event_id", eventID.String()))
-			conv = NewConversation(eventID, content.Body)
+			conv = NewConversation(eventID, m.config.SystemPrompt, content.Body)
 			m.conversations = append(m.conversations, conv)
 		}
 
