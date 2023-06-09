@@ -13,20 +13,29 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-type Config struct {
+type ConfigOpenAI struct {
+	APIKey string
+}
+
+type ConfigBot struct {
+	DBPath          string
+	Pickle          string
 	Homeserver      string
 	UserID          string
 	UserAccessKey   string
 	UserPassword    string
 	UserDisplayName string
-	DBPath          string
-	Pickle          string
-	OpenAIKey       string
 	SystemPrompt    string
 }
 
+type Config struct {
+	OpenAI ConfigOpenAI `toml:"openai"`
+	Bots   []ConfigBot  `toml:"bot"`
+}
+
 type Bot struct {
-	config        Config
+	openaiKey     string
+	config        ConfigBot
 	client        *mautrix.Client
 	cryptoHelper  *cryptohelper.CryptoHelper
 	characters    []Character
@@ -35,10 +44,11 @@ type Bot struct {
 	logger        *slog.Logger
 }
 
-func New(cfg Config, logger *slog.Logger) *Bot {
+func New(openaiKey string, cfg ConfigBot, logger *slog.Logger) *Bot {
 	return &Bot{
-		config: cfg,
-		logger: logger,
+		openaiKey: openaiKey,
+		config:    cfg,
+		logger:    logger,
 	}
 }
 
@@ -63,7 +73,7 @@ func (m *Bot) Init() error {
 		return err
 	}
 	m.client.Crypto = m.cryptoHelper
-	m.gptClient = NewGPT(m.config.OpenAIKey)
+	m.gptClient = NewGPT(m.openaiKey)
 	m.conversations = make(Conversations, 0)
 	m.AddEventHandler(m.InviteHandler())
 	m.AddEventHandler(m.ResponseHandler())
