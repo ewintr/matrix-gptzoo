@@ -1,8 +1,8 @@
 package bot
 
 import (
-	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/sashabaranov/go-openai"
 	"golang.org/x/exp/slog"
@@ -13,19 +13,44 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
+var (
+	botNames = []string{}
+	mu       = &sync.Mutex{}
+)
+
+func BotNameAppend(name string) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	botNames = append(botNames, name)
+}
+
+func BotNameRegistered(want string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	for _, got := range botNames {
+		if strings.ToLower(want) == strings.ToLower(got) {
+			return true
+		}
+	}
+
+	return false
+}
+
 type ConfigOpenAI struct {
 	APIKey string
 }
 
 type ConfigBot struct {
-	DBPath          string
-	Pickle          string
-	Homeserver      string
-	UserID          string
-	UserAccessKey   string
-	UserPassword    string
-	UserDisplayName string
-	SystemPrompt    string
+	DBPath            string
+	Pickle            string
+	Homeserver        string
+	UserID            string
+	UserAccessKey     string
+	UserPassword      string
+	UserDisplayName   string
+	SystemPrompt      string
+	AnswerUnaddressed bool
 }
 
 type Config struct {
@@ -77,6 +102,9 @@ func (m *Bot) Init() error {
 	m.conversations = make(Conversations, 0)
 	m.AddEventHandler(m.InviteHandler())
 	m.AddEventHandler(m.ResponseHandler())
+
+	m.config.UserDisplayName = strings.ToLower(m.config.UserDisplayName)
+	BotNameAppend(m.config.UserDisplayName)
 
 	return nil
 }
@@ -156,10 +184,22 @@ func (m *Bot) ResponseHandler() (event.Type, mautrix.EventHandler) {
 			}
 		}
 
-		// find out if message is a new question addressed to the bot
 		m.logger.Info(content.Body)
-		if conv == nil && strings.HasPrefix(strings.ToLower(content.Body), strings.ToLower(fmt.Sprintf("%s: ", m.config.UserDisplayName))) {
+		addressedTo, _, isAddressed := strings.Cut(content.Body, ": ")
+		addressedTo = strings.TrimSpace(strings.ToLower(addressedTo))
+		if strings.Contains(addressedTo, " ") {
+			isAddressed = false // only display names without spaces, otherwise no way to know if it's a name or not
+		}
+
+		// find out if message is a new question addressed to the bot
+		if conv == nil && isAddressed && addressedTo == m.config.UserDisplayName {
 			m.logger.Info("message is addressed to bot", slog.String("event_id", eventID.String()))
+			conv = NewConversation(eventID, m.config.SystemPrompt, content.Body)
+			m.conversations = append(m.conversations, conv)
+		}
+		// find out if the message is addressed to no-one and this bot answers those
+		if conv == nil && !isAddressed && m.config.AnswerUnaddressed {
+			m.logger.Info("message is addressed to no-one", slog.String("event_id", eventID.String()))
 			conv = NewConversation(eventID, m.config.SystemPrompt, content.Body)
 			m.conversations = append(m.conversations, conv)
 		}
