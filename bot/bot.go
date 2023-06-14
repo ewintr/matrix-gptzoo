@@ -25,18 +25,6 @@ func BotNameAppend(name string) {
 	botNames = append(botNames, name)
 }
 
-func BotNameRegistered(want string) bool {
-	mu.Lock()
-	defer mu.Unlock()
-	for _, got := range botNames {
-		if strings.ToLower(want) == strings.ToLower(got) {
-			return true
-		}
-	}
-
-	return false
-}
-
 type ConfigOpenAI struct {
 	APIKey string
 }
@@ -140,11 +128,11 @@ func (m *Bot) InviteHandler() (event.Type, mautrix.EventHandler) {
 		if evt.GetStateKey() == m.client.UserID.String() && evt.Content.AsMember().Membership == event.MembershipInvite {
 			_, err := m.client.JoinRoomByID(evt.RoomID)
 			if err != nil {
-				m.logger.Error("failed to join room after invite", slog.String("err", err.Error()), slog.String("room_id", evt.RoomID.String()), slog.String("inviter", evt.Sender.String()))
+				m.logger.Error("failed to join room after invite", slog.String("err", err.Error()), slog.String("room_id", evt.RoomID.String()), slog.String("inviter", evt.Sender.String()), slog.String("bot", m.config.UserDisplayName))
 				return
 			}
 
-			m.logger.Info("joined room after invite", slog.String("room_id", evt.RoomID.String()), slog.String("inviter", evt.Sender.String()))
+			m.logger.Info("joined room after invite", slog.String("room_id", evt.RoomID.String()), slog.String("inviter", evt.Sender.String()), slog.String("bot", m.config.UserDisplayName))
 		}
 	}
 }
@@ -157,13 +145,13 @@ func (m *Bot) ResponseHandler() (event.Type, mautrix.EventHandler) {
 
 		// ignore if the message is already recorded
 		if conv := m.conversations.FindByEventID(eventID); conv != nil {
-			m.logger.Info("known message, ignoring", slog.String("event_id", eventID.String()))
+			m.logger.Info("known message, ignoring", slog.String("event_id", eventID.String()), slog.String("bot", m.config.UserDisplayName))
 			return
 		}
 
 		// ignore if the message is sent by the bot itself
 		if evt.Sender == id.UserID(m.config.UserID) {
-			m.logger.Info("message sent by bot itself, ignoring", slog.String("event_id", eventID.String()))
+			m.logger.Info("message sent by bot itself, ignoring", slog.String("event_id", eventID.String()), slog.String("bot", m.config.UserDisplayName))
 			return
 		}
 
@@ -176,7 +164,7 @@ func (m *Bot) ResponseHandler() (event.Type, mautrix.EventHandler) {
 				hasParent = true
 				m.logger.Info("message is a reply", slog.String("parent_id", parentID.String()))
 				if c := m.conversations.FindByEventID(parentID); c != nil {
-					m.logger.Info("found parent, appending message to conversation", slog.String("event_id", eventID.String()))
+					m.logger.Info("found parent, appending message to conversation", slog.String("event_id", eventID.String()), slog.String("bot", m.config.UserDisplayName))
 					c.Add(Message{
 						EventID:  eventID,
 						ParentID: parentID,
@@ -197,26 +185,26 @@ func (m *Bot) ResponseHandler() (event.Type, mautrix.EventHandler) {
 
 		// find out if message is a new question addressed to the bot
 		if conv == nil && isAddressed && addressedTo == m.config.UserDisplayName {
-			m.logger.Info("message is addressed to bot", slog.String("event_id", eventID.String()))
+			m.logger.Info("message is addressed to bot", slog.String("event_id", eventID.String()), slog.String("bot", m.config.UserDisplayName))
 			conv = NewConversation(eventID, m.config.SystemPrompt, content.Body)
 			m.conversations = append(m.conversations, conv)
 		}
 		// find out if the message is addressed to no-one and this bot answers those
 		if conv == nil && !isAddressed && !hasParent && m.config.AnswerUnaddressed {
-			m.logger.Info("message is addressed to no-one", slog.String("event_id", eventID.String()))
+			m.logger.Info("message is addressed to no-one", slog.String("event_id", eventID.String()), slog.String("bot", m.config.UserDisplayName))
 			conv = NewConversation(eventID, m.config.SystemPrompt, content.Body)
 			m.conversations = append(m.conversations, conv)
 		}
 
 		if conv == nil {
-			m.logger.Info("apparently not for us, ignoring", slog.String("event_id", eventID.String()))
+			m.logger.Info("apparently not for us, ignoring", slog.String("event_id", eventID.String()), slog.String("bot", m.config.UserDisplayName))
 			return
 		}
 
 		// get reply from GPT
 		reply, err := m.gptClient.Complete(conv)
 		if err != nil {
-			m.logger.Error("failed to get reply from openai", slog.String("err", err.Error()))
+			m.logger.Error("failed to get reply from openai", slog.String("err", err.Error()), slog.String("bot", m.config.UserDisplayName))
 			return
 		}
 
@@ -228,7 +216,7 @@ func (m *Bot) ResponseHandler() (event.Type, mautrix.EventHandler) {
 		}
 		res, err := m.client.SendMessageEvent(evt.RoomID, event.EventMessage, &formattedReply)
 		if err != nil {
-			m.logger.Error("failed to send message", slog.String("err", err.Error()))
+			m.logger.Error("failed to send message", slog.String("err", err.Error()), slog.String("bot", m.config.UserDisplayName))
 			return
 		}
 		conv.Add(Message{
@@ -241,6 +229,6 @@ func (m *Bot) ResponseHandler() (event.Type, mautrix.EventHandler) {
 		if len(reply) > 30 {
 			reply = reply[:30] + "..."
 		}
-		m.logger.Info("sent reply", slog.String("parent_id", eventID.String()), slog.String("content", reply))
+		m.logger.Info("sent reply", slog.String("parent_id", eventID.String()), slog.String("content", reply), slog.String("bot", m.config.UserDisplayName))
 	}
 }
