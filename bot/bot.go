@@ -77,7 +77,7 @@ func New(openaiKey string, cfg ConfigBot, logger *slog.Logger) *Bot {
 	}
 }
 
-func (m *Bot) Init() error {
+func (m *Bot) Init(acceptInvites bool) error {
 	client, err := mautrix.NewClient(m.config.Homeserver, id.UserID(m.config.UserID), m.config.UserAccessKey)
 	if err != nil {
 		return err
@@ -100,7 +100,9 @@ func (m *Bot) Init() error {
 	m.client.Crypto = m.cryptoHelper
 	m.gptClient = NewGPT(m.openaiKey)
 	m.conversations = make(Conversations, 0)
-	m.AddEventHandler(m.InviteHandler())
+	if acceptInvites {
+		m.AddEventHandler(m.InviteHandler())
+	}
 	m.AddEventHandler(m.ResponseHandler())
 
 	m.config.UserDisplayName = strings.ToLower(m.config.UserDisplayName)
@@ -168,8 +170,10 @@ func (m *Bot) ResponseHandler() (event.Type, mautrix.EventHandler) {
 		var conv *Conversation
 		// find out if it is a reply to a known conversation
 		parentID := id.EventID("")
+		var hasParent bool
 		if relatesTo := content.GetRelatesTo(); relatesTo != nil {
 			if parentID = relatesTo.GetReplyTo(); parentID != "" {
+				hasParent = true
 				m.logger.Info("message is a reply", slog.String("parent_id", parentID.String()))
 				if c := m.conversations.FindByEventID(parentID); c != nil {
 					m.logger.Info("found parent, appending message to conversation", slog.String("event_id", eventID.String()))
@@ -198,7 +202,7 @@ func (m *Bot) ResponseHandler() (event.Type, mautrix.EventHandler) {
 			m.conversations = append(m.conversations, conv)
 		}
 		// find out if the message is addressed to no-one and this bot answers those
-		if conv == nil && !isAddressed && m.config.AnswerUnaddressed {
+		if conv == nil && !isAddressed && !hasParent && m.config.AnswerUnaddressed {
 			m.logger.Info("message is addressed to no-one", slog.String("event_id", eventID.String()))
 			conv = NewConversation(eventID, m.config.SystemPrompt, content.Body)
 			m.conversations = append(m.conversations, conv)

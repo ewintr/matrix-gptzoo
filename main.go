@@ -48,11 +48,17 @@ func main() {
 	config.OpenAI = bot.ConfigOpenAI{
 		APIKey: getParam("OPENAI_API_KEY", ""),
 	}
+
+	var acceptInvites bool
+	if getParam("MATRIX_ACCEPT_INVITES", "false") == "true" {
+		acceptInvites = true
+	}
+
 	logger.Info("loaded config", slog.Int("bots", len(config.Bots)))
 
 	for _, bc := range config.Bots {
 		b := bot.New(config.OpenAI.APIKey, bc, logger)
-		if err := b.Init(); err != nil {
+		if err := b.Init(acceptInvites); err != nil {
 			logger.Error(err.Error())
 			os.Exit(1)
 		}
