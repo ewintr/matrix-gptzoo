@@ -3,7 +3,7 @@ package bot_test
 import (
 	"testing"
 
-	"ewintr.nl/matrix-bots/bot"
+	"go-mod.ewintr.nl/matrix-bots/bot"
 )
 
 func TestNewConversation(t *testing.T) {

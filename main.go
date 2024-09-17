@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/signal"
 
-	"ewintr.nl/matrix-bots/bot"
+	"go-mod.ewintr.nl/matrix-bots/bot"
 	"github.com/BurntSushi/toml"
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/exp/slog"

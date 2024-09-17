@@ -1,4 +1,4 @@
-module ewintr.nl/matrix-bots
+module go-mod.ewintr.nl/matrix-bots
 
 go 1.20
 
